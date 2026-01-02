@@ -23,6 +23,6 @@ module O = struct
 end
 
 module type Design = sig
-  val generate_input : string -> int list
+  val inputs : (string * int list) list
   val create : Signal.t I.t -> Signal.t O.t
 end

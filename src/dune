@@ -2,6 +2,7 @@
  (name advent_of_fpga)
  (libraries
    hardcaml
+   re
    )
  (preprocess
    (pps ppx_jane ppx_hardcaml)))

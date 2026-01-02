@@ -35,13 +35,18 @@ let run_sim (sim : Sim.t) =
   let part2 = Bits.to_unsigned_int !(outputs.part2) in
   (part1, part2)
 
+let choose_input inputs variant =
+  List.find inputs ~f:(fun (name, _) -> String.equal name variant)
+  |> Option.value_exn
+  |> fun (_, x) -> x
+
 let run design_name variant =
   match
     List.find ~f:(fun (name, _) -> String.equal name design_name) designs
   with
   | None -> (0, 0)
   | Some (_, (module D)) ->
-      let input_data = D.generate_input variant in
+      let input_data = choose_input D.inputs variant in
       let sim = create_sim (module D) in
       clear_sim sim;
       input_sim sim input_data;
