@@ -1,0 +1,8 @@
+(library
+ (name advent_of_fpga_input_parsers)
+ (libraries
+   core
+   re)
+ (preprocessor_deps (glob_files *.txt))
+ (preprocess
+   (pps ppx_jane ppx_embed_file)))
