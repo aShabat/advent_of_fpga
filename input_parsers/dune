@@ -2,6 +2,7 @@
  (name advent_of_fpga_input_parsers)
  (libraries
    core
+   advent_of_fpga
    re)
  (preprocessor_deps (glob_files *.txt))
  (preprocess
