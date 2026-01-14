@@ -24,6 +24,9 @@ let programms =
   ; ( "day03"
     , ( generate_run (module Solutions.Day03)
       , [ "sample", Parsers.Day03.sample; "input", Parsers.Day03.input ] ) )
+  ; ( "day07"
+    , ( generate_run (module Solutions.Day07)
+      , [ "sample", Parsers.Day07.sample; "input", Parsers.Day07.input ] ) )
   ]
 ;;
 
