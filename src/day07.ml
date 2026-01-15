@@ -40,7 +40,7 @@ let rec nth_digit num ~num_width ~n =
 
 (* separate signal into 10-based digits at combinatorial speed *)
 let digits ~count input =
-  Array.init count ~f:(fun n -> nth_digit ~num_width:digits_count ~n input) |> Array.rev
+  List.init count ~f:(fun n -> nth_digit ~num_width:digits_count ~n input) |> List.rev
 ;;
 
 module State = struct
@@ -52,30 +52,40 @@ module State = struct
   [@@deriving sexp_of, compare ~localize, enumerate]
 end
 
-let array_values (l : Always.Variable.t array) = Array.map l ~f:(fun v -> v.value)
+let list_values (l : Always.Variable.t list) = List.map l ~f:(fun v -> v.value)
 
-let array_assign l v =
-  Always.proc
-    (List.of_array (Array.map2_exn l v ~f:(fun left value -> Always.(left <-- value))))
+let list_assign ?(start = 0) ?len l v =
+  let len =
+    match len with
+    | None -> List.length l - start
+    | Some end_ -> end_
+  in
+  let _, l = List.split_n l start in
+  let l, _ = List.split_n l len in
+  Always.proc (List.map2_exn l v ~f:(fun lv vv -> Always.(lv <-- vv)))
 ;;
 
-let array_shift a offset =
-  Always.proc
-    (List.of_array
-       (Array.init
-          (Array.length a - offset - 1)
-          ~f:(fun i -> Always.(a.(i) <-- a.(i + offset).value))))
+let list_shift_left l offset =
+  let _, l_offset = List.split_n l offset in
+  let l, _ = List.split_n l (List.length l - offset) in
+  Always.proc (List.map2_exn l (list_values l_offset) ~f:Always.( <-- ))
 ;;
 
-let dial_update dial splitters i =
-  let nothing = Signal.zero int_size in
-  if i = 0 || i = dial_width - 1
-  then nothing
-  else
-    Signal.(
-      mux2 splitters.(i - 1) dial.(i - 1) nothing
-      +: mux2 splitters.(i) nothing dial.(i)
-      +: mux2 splitters.(i + 1) dial.(i + 1) nothing)
+let dial_update dial splitters =
+  let shift_left l = List.tl_exn l @ [ Signal.zero int_size ] in
+  let shift_right l = List.rev (shift_left (List.rev l)) in
+  let dial_left =
+    shift_left
+      (List.map2_exn dial splitters ~f:(fun d s -> Signal.mux2 s d (Signal.zero int_size)))
+  in
+  let dial_right =
+    shift_right
+      (List.map2_exn dial splitters ~f:(fun d s -> Signal.mux2 s d (Signal.zero int_size)))
+  in
+  let dial =
+    List.map2_exn dial splitters ~f:(fun d s -> Signal.mux2 s (Signal.zero int_size) d)
+  in
+  List.map3_exn dial_left dial dial_right ~f:(fun l m r -> Signal.(l +: m +: r))
 ;;
 
 let create ({ clock; clear; fifo_read; fifo_empty; start } : _ Solution.I.t) =
@@ -86,22 +96,23 @@ let create ({ clock; clear; fifo_read; fifo_empty; start } : _ Solution.I.t) =
   let part2 = Variable.reg ~width:int_size spec in
   let done_ = Variable.wire ~default:Signal.gnd () in
   let fifo_read_enable = Variable.wire ~default:Signal.gnd () in
-  let dial = Array.init dial_width ~f:(fun _ -> Variable.reg ~width:int_size spec) in
-  let splitters = Array.init dial_width ~f:(fun _ -> Variable.reg ~width:1 spec) in
-  let tl_for_new l = Array.sub l ~pos:(dial_width - digits_count) ~len:digits_count in
+  let dial = List.init dial_width ~f:(fun _ -> Variable.reg ~width:int_size spec) in
+  let splitters = List.init dial_width ~f:(fun _ -> Variable.reg ~width:1 spec) in
   compile
     [ sm.switch
         [ ( Waiting_for_start
-          , [ when_ start [ part1 <--. 0; sm.set_next Reading_initial_dial ] ] )
+          , [ when_ start [ part1 <--. 0; part2 <--. 0; sm.set_next Reading_initial_dial ]
+            ] )
         ; ( Reading_initial_dial
           , [ fifo_read_enable <--. 1
             ; if_
                 Signal.(fifo_read ==:. 0)
                 [ sm.set_next Reading_splitters ]
-                [ array_shift dial digits_count
-                ; array_assign
-                    (tl_for_new dial)
-                    (Array.map (digits ~count:digits_count fifo_read) ~f:(fun v ->
+                [ list_shift_left dial digits_count
+                ; list_assign
+                    ~start:(dial_width - digits_count)
+                    dial
+                    (List.map (digits ~count:digits_count fifo_read) ~f:(fun v ->
                        Signal.(mux2 (v ==:. 2) (one int_size) (zero int_size))))
                 ]
             ] )
@@ -109,36 +120,30 @@ let create ({ clock; clear; fifo_read; fifo_empty; start } : _ Solution.I.t) =
           , [ fifo_read_enable <--. 1
             ; if_
                 fifo_empty
-                [ part2
-                  <-- Array.fold dial ~init:(Signal.zero int_size) ~f:(fun acc d ->
-                    Signal.(acc +: d.value))
+                [ part2 <-- List.reduce_exn (list_values dial) ~f:Signal.( +: )
                 ; sm.set_next Done
                 ]
                 [ if_
                     Signal.(fifo_read ==:. 0)
-                    [ array_assign
+                    [ list_assign
                         dial
-                        (Array.init
-                           dial_width
-                           ~f:(dial_update (array_values dial) (array_values splitters)))
-                    ]
-                    [ array_shift splitters digits_count
-                    ; array_assign
-                        (tl_for_new splitters)
-                        (Array.map (digits ~count:digits_count fifo_read) ~f:(fun v ->
-                           Signal.(v ==:. 2)))
+                        (dial_update (list_values dial) (list_values splitters))
                     ; part1
                       <-- List.fold
-                            (List.range 0 dial_width)
+                            (List.map2_exn
+                               (list_values dial)
+                               (list_values splitters)
+                               ~f:(fun d s ->
+                                 Signal.(uresize ~width:int_size (d >+. 0 &: s))))
                             ~init:part1.value
-                            ~f:(fun acc i ->
-                              Signal.(
-                                acc
-                                +: mux2
-                                     (splitters.(i).value &: negate (dial.(i).value ==:. 0)
-                                     )
-                                     (one int_size)
-                                     (zero int_size)))
+                            ~f:Signal.( +: )
+                    ]
+                    [ list_shift_left splitters digits_count
+                    ; list_assign
+                        splitters
+                        ~start:(dial_width - digits_count)
+                        (List.map (digits ~count:digits_count fifo_read) ~f:(fun v ->
+                           Signal.(v ==:. 2)))
                     ]
                 ]
             ] )
