@@ -11,7 +11,7 @@ This is solutions for Jane Street's Advent of FPGA event. The structure of the p
 ```
 
 ## Implemtation
-The implementations don't target real-world hardware. The input is read from fifo. The bench adds fifo wrapper to circuits and submits the input. Syntax of the binary is `main day0x \(sample|input\)`.
+The implementations don't target real-world hardware. The input is read from fifo. The bench adds fifo wrapper to circuits and submits the input. Syntax of the binary is `main day0x (sample|input)`.
 
 ## Days implemented
 ### Day 1
